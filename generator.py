@@ -125,10 +125,11 @@ async def generate_image_cloudflare(prompt: str) -> bytes:
         f"https://api.cloudflare.com/client/v4/accounts/"
         f"{CLOUDFLARE_ACCOUNT_ID}/ai/run/{CLOUDFLARE_MODEL}"
     )
+    # Как в рабочем curl: prompt + steps. seed — небольшое int (доки CF иногда капризны к диапазону).
     payload = {
-        "prompt": prompt[:2048],
-        "steps": max(1, min(CLOUDFLARE_STEPS, 8)),
-        "seed": random.randint(1, 2_147_483_647),
+        "prompt": (prompt or "surreal illustration")[:2048],
+        "steps": max(1, min(int(CLOUDFLARE_STEPS), 8)),
+        "seed": random.randint(0, 999_999),
     }
 
     async with httpx.AsyncClient(timeout=120.0) as http:
@@ -140,7 +141,17 @@ async def generate_image_cloudflare(prompt: str) -> bytes:
             },
             json=payload,
         )
-        resp.raise_for_status()
+        # Не глотаем тело ошибки — оно нужно для диагностики
+        if resp.status_code >= 400:
+            body = resp.text[:800]
+            logger.error(
+                "Cloudflare HTTP %s payload=%s body=%s",
+                resp.status_code,
+                payload,
+                body,
+            )
+            raise RuntimeError(f"Cloudflare HTTP {resp.status_code}: {body}")
+
         data = resp.json()
 
     if not data.get("success"):
@@ -149,7 +160,7 @@ async def generate_image_cloudflare(prompt: str) -> bytes:
 
     image_b64 = (data.get("result") or {}).get("image")
     if not image_b64:
-        raise RuntimeError("Cloudflare returned empty image")
+        raise RuntimeError(f"Cloudflare returned empty image: {str(data)[:300]}")
 
     img_bytes = base64.b64decode(image_b64)
     if len(img_bytes) < 500:
@@ -157,6 +168,7 @@ async def generate_image_cloudflare(prompt: str) -> bytes:
 
     logger.info("Cloudflare image ok, size=%d bytes", len(img_bytes))
     return img_bytes
+
 
 
 # ---------------------------------------------------------------------------
