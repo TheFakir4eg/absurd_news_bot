@@ -125,11 +125,10 @@ async def generate_image_cloudflare(prompt: str) -> bytes:
         f"https://api.cloudflare.com/client/v4/accounts/"
         f"{CLOUDFLARE_ACCOUNT_ID}/ai/run/{CLOUDFLARE_MODEL}"
     )
-    # Как в рабочем curl: prompt + steps. seed — небольшое int (доки CF иногда капризны к диапазону).
+    # FLUX.1 Schnell на CF: только prompt + steps. Поле seed даёт 400 (code 5006).
     payload = {
         "prompt": (prompt or "surreal illustration")[:2048],
         "steps": max(1, min(int(CLOUDFLARE_STEPS), 8)),
-        "seed": random.randint(0, 999_999),
     }
 
     async with httpx.AsyncClient(timeout=120.0) as http:
@@ -168,6 +167,7 @@ async def generate_image_cloudflare(prompt: str) -> bytes:
 
     logger.info("Cloudflare image ok, size=%d bytes", len(img_bytes))
     return img_bytes
+
 
 
 
