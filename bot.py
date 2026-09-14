@@ -153,12 +153,23 @@ async def cmd_new(message: Message):
 async def callback_again(callback: CallbackQuery):
     await callback.answer()
 
-    # Старый message_id больше не нужен
-    if callback.message:
-        _message_images.pop(callback.message.message_id, None)
+    chat_id = callback.message.chat.id
 
-    wait_msg = await callback.message.edit_text(
-        "⏳ Генерирую новую абсурдную новость и картинку..."
+    # Старый message_id больше не нужен
+    _message_images.pop(callback.message.message_id, None)
+
+    # Сообщение с фото нельзя edit_text — удаляем и шлём новое «ждём»
+    try:
+        await callback.message.delete()
+    except Exception:
+        try:
+            await callback.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+    wait_msg = await bot.send_message(
+        chat_id=chat_id,
+        text="⏳ Генерирую новую абсурдную новость и картинку...",
     )
 
     try:
@@ -167,7 +178,7 @@ async def callback_again(callback: CallbackQuery):
             raise ValueError("Пустой текст от модели")
 
         await _send_news_with_image(
-            chat_id=callback.message.chat.id,
+            chat_id=chat_id,
             news=news,
             edit_message=wait_msg,
         )
@@ -178,8 +189,9 @@ async def callback_again(callback: CallbackQuery):
                 "😔 Не удалось сгенерировать новость. Попробуй ещё раз чуть позже."
             )
         except Exception:
-            await callback.message.answer(
-                "😔 Не удалось сгенерировать новость. Попробуй ещё раз чуть позже."
+            await bot.send_message(
+                chat_id=chat_id,
+                text="😔 Не удалось сгенерировать новость. Попробуй ещё раз чуть позже.",
             )
 
 
