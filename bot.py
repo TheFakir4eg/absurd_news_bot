@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# message_id -> image_url (чтобы при публикации отдать картинку на сайт)
+_message_images: dict[int, str] = {}
+
 
 def get_result_keyboard():
     builder = InlineKeyboardBuilder()
@@ -28,8 +31,8 @@ def get_result_keyboard():
 
 async def _send_news_with_image(chat_id: int, news: str, edit_message: Message | None = None):
     """
-    Генерирует картинку по новости и отправляет/редактирует сообщение.
-    Если edit_message передан — пытаемся отредактировать, иначе шлём новое.
+    Генерирует картинку по новости и отправляет сообщение с фото.
+    Сохраняет image_url по message_id для последующей публикации на сайт.
     """
     try:
         image_url = await generate_image_url(news)
@@ -38,77 +41,74 @@ async def _send_news_with_image(chat_id: int, news: str, edit_message: Message |
         image_url = None
 
     caption = news
-    # Telegram caption limit ~1024
     if len(caption) > 1000:
         caption = caption[:997] + "..."
 
+    sent: Message | None = None
+
     if image_url:
         try:
-            # Сначала пробуем отправить по URL (Telegram сам скачает)
             photo = URLInputFile(image_url)
             if edit_message:
-                # edit_media сложнее, проще удалить старое и отправить новое
                 try:
                     await edit_message.delete()
                 except Exception:
                     pass
-                await bot.send_photo(
-                    chat_id=chat_id,
-                    photo=photo,
-                    caption=caption,
-                    reply_markup=get_result_keyboard(),
-                    parse_mode="Markdown",
-                )
-            else:
-                await bot.send_photo(
-                    chat_id=chat_id,
-                    photo=photo,
-                    caption=caption,
-                    reply_markup=get_result_keyboard(),
-                    parse_mode="Markdown",
-                )
-            return
-        except Exception:
-            logger.exception("Не удалось отправить фото по URL, пробуем скачать")
-
-        # Fallback: скачиваем байты и отправляем как файл
-        try:
-            img_bytes = await download_image_bytes(image_url)
-            photo = BufferedInputFile(img_bytes, filename="news.jpg")
-            if edit_message:
-                try:
-                    await edit_message.delete()
-                except Exception:
-                    pass
-            await bot.send_photo(
+            sent = await bot.send_photo(
                 chat_id=chat_id,
                 photo=photo,
                 caption=caption,
                 reply_markup=get_result_keyboard(),
                 parse_mode="Markdown",
             )
-            return
         except Exception:
-            logger.exception("Не удалось скачать/отправить картинку")
+            logger.exception("Не удалось отправить фото по URL, пробуем скачать")
+            try:
+                img_bytes = await download_image_bytes(image_url)
+                photo = BufferedInputFile(img_bytes, filename="news.jpg")
+                if edit_message:
+                    try:
+                        await edit_message.delete()
+                    except Exception:
+                        pass
+                sent = await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=caption,
+                    reply_markup=get_result_keyboard(),
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                logger.exception("Не удалось скачать/отправить картинку")
+                image_url = None  # фото не ушло — на сайт тоже не отдаём
 
-    # Если картинка совсем не получилась — просто текст
-    if edit_message:
-        try:
-            await edit_message.edit_text(
-                news,
+    if sent is None:
+        # Картинки нет — просто текст
+        if edit_message:
+            try:
+                sent = await edit_message.edit_text(
+                    news,
+                    reply_markup=get_result_keyboard(),
+                    parse_mode="Markdown",
+                )
+            except TelegramBadRequest:
+                sent = await bot.send_message(
+                    chat_id=chat_id,
+                    text=news,
+                    reply_markup=get_result_keyboard(),
+                    parse_mode="Markdown",
+                )
+        else:
+            sent = await bot.send_message(
+                chat_id=chat_id,
+                text=news,
                 reply_markup=get_result_keyboard(),
                 parse_mode="Markdown",
             )
-            return
-        except TelegramBadRequest:
-            pass
 
-    await bot.send_message(
-        chat_id=chat_id,
-        text=news,
-        reply_markup=get_result_keyboard(),
-        parse_mode="Markdown",
-    )
+    if sent and image_url:
+        _message_images[sent.message_id] = image_url
+        logger.info("Saved image_url for message_id=%s", sent.message_id)
 
 
 @dp.message(CommandStart())
@@ -152,7 +152,14 @@ async def cmd_new(message: Message):
 @dp.callback_query(F.data == "again")
 async def callback_again(callback: CallbackQuery):
     await callback.answer()
-    wait_msg = await callback.message.edit_text("⏳ Генерирую новую абсурдную новость и картинку...")
+
+    # Старый message_id больше не нужен
+    if callback.message:
+        _message_images.pop(callback.message.message_id, None)
+
+    wait_msg = await callback.message.edit_text(
+        "⏳ Генерирую новую абсурдную новость и картинку..."
+    )
 
     try:
         news = await generate_absurd_news()
@@ -180,16 +187,17 @@ async def callback_again(callback: CallbackQuery):
 async def callback_done(callback: CallbackQuery):
     await callback.answer("Публикую…")
 
-    # Берём текст из caption (если было фото) или из text
     news_text = callback.message.caption or callback.message.text or ""
     if not news_text.strip():
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer("😔 Нечего публиковать — текст новости пустой.")
         return
 
+    image_url = _message_images.pop(callback.message.message_id, "") or ""
+
     try:
-        result = await publish_news(news_text)
-        logger.info("Опубликовано: %s", result)
+        result = await publish_news(news_text, image_url=image_url)
+        logger.info("Опубликовано: %s (image=%s)", result, bool(image_url))
         await callback.message.edit_reply_markup(reply_markup=None)
         await callback.message.answer("✅ Новость опубликована на сайте!")
     except Exception:
