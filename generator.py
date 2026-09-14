@@ -28,78 +28,6 @@ client = AsyncOpenAI(
     base_url=GROQ_BASE_URL,
 )
 
-
-# async def generate_absurd_news() -> str:
-#     """Генерирует одну абсурдную новость через Groq."""
-
-#     response = await client.chat.completions.create(
-#         model=GROQ_MODEL,
-#         messages=[
-#             {"role": "system", "content": SYSTEM_PROMPT},
-#             {"role": "user", "content": USER_PROMPT},
-#         ],
-#         temperature=0.9,
-#         max_tokens=800,
-#         extra_body={
-#             "reasoning_effort": "low",
-#             "include_reasoning": False,
-#         },
-#     )
-
-#     choice = response.choices[0]
-#     message = choice.message
-#     content = (message.content or "").strip()
-
-#     if not content:
-#         reasoning = getattr(message, "reasoning", None) or ""
-
-#         logger.warning(
-#             "Пустой content. finish_reason=%s, reasoning_preview=%s",
-#             choice.finish_reason,
-#             (reasoning[:300] + "...") if reasoning else None,
-#         )
-
-#         if reasoning:
-#             content = reasoning.strip()
-
-#     if not content:
-#         raise ValueError("Модель вернула пустой текст")
-
-#     return content
-# def _call_groq(system: str, user: str, temperature: float = 0.9, max_tokens: int = 800) -> str:
-#     """Синхронный вызов Groq (gpt-oss)."""
-#     response = client.chat.completions.create(
-#         model=GROQ_MODEL,
-#         messages=[
-#             {"role": "system", "content": system},
-#             {"role": "user", "content": user},
-#         ],
-#         temperature=temperature,
-#         max_tokens=max_tokens,
-#         extra_body={
-#             "reasoning_effort": "low",
-#             "include_reasoning": False,
-#         },
-#     )
-
-#     choice = response.choices[0]
-#     message = choice.message
-#     content = (message.content or "").strip()
-
-#     if not content:
-#         reasoning = getattr(message, "reasoning", None) or ""
-#         logger.warning(
-#             "Пустой content. finish_reason=%s, reasoning_preview=%s",
-#             choice.finish_reason,
-#             (reasoning[:300] + "...") if reasoning else None,
-#         )
-#         if reasoning:
-#             content = reasoning.strip()
-
-#     if not content:
-#         raise ValueError("Модель вернула пустой текст")
-
-#     return content
 async def _call_groq(
     system: str,
     user: str,
@@ -140,9 +68,17 @@ async def _call_groq(
 
     return content
 
+# async def generate_absurd_news() -> str:
+#     """Генерирует одну абсурдную новость через Groq."""
+#     return _call_groq(SYSTEM_PROMPT, USER_PROMPT, temperature=0.9, max_tokens=800)
+
 async def generate_absurd_news() -> str:
-    """Генерирует одну абсурдную новость через Groq."""
-    return _call_groq(SYSTEM_PROMPT, USER_PROMPT, temperature=0.9, max_tokens=800)
+    return await _call_groq(
+        SYSTEM_PROMPT,
+        USER_PROMPT,
+        temperature=0.9,
+        max_tokens=800,
+    )
 
 def build_pollinations_url(prompt: str) -> str:
     """
@@ -165,7 +101,7 @@ def build_pollinations_url(prompt: str) -> str:
 async def generate_image_prompt(news: str) -> str:
     """По тексту новости генерирует короткий английский промпт для картинки."""
     user = IMAGE_PROMPT_USER.format(news=news.strip())
-    prompt = _call_groq(
+    prompt = await _call_groq(
         IMAGE_PROMPT_SYSTEM,
         user,
         temperature=0.7,
