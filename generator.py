@@ -66,9 +66,48 @@ client = AsyncOpenAI(
 #         raise ValueError("Модель вернула пустой текст")
 
 #     return content
-def _call_groq(system: str, user: str, temperature: float = 0.9, max_tokens: int = 800) -> str:
-    """Синхронный вызов Groq (gpt-oss)."""
-    response = client.chat.completions.create(
+# def _call_groq(system: str, user: str, temperature: float = 0.9, max_tokens: int = 800) -> str:
+#     """Синхронный вызов Groq (gpt-oss)."""
+#     response = client.chat.completions.create(
+#         model=GROQ_MODEL,
+#         messages=[
+#             {"role": "system", "content": system},
+#             {"role": "user", "content": user},
+#         ],
+#         temperature=temperature,
+#         max_tokens=max_tokens,
+#         extra_body={
+#             "reasoning_effort": "low",
+#             "include_reasoning": False,
+#         },
+#     )
+
+#     choice = response.choices[0]
+#     message = choice.message
+#     content = (message.content or "").strip()
+
+#     if not content:
+#         reasoning = getattr(message, "reasoning", None) or ""
+#         logger.warning(
+#             "Пустой content. finish_reason=%s, reasoning_preview=%s",
+#             choice.finish_reason,
+#             (reasoning[:300] + "...") if reasoning else None,
+#         )
+#         if reasoning:
+#             content = reasoning.strip()
+
+#     if not content:
+#         raise ValueError("Модель вернула пустой текст")
+
+#     return content
+async def _call_groq(
+    system: str,
+    user: str,
+    temperature: float = 0.9,
+    max_tokens: int = 800,
+) -> str:
+    """Асинхронный вызов Groq (gpt-oss)."""
+    response = await client.chat.completions.create(
         model=GROQ_MODEL,
         messages=[
             {"role": "system", "content": system},
@@ -100,7 +139,6 @@ def _call_groq(system: str, user: str, temperature: float = 0.9, max_tokens: int
         raise ValueError("Модель вернула пустой текст")
 
     return content
-
 
 async def generate_absurd_news() -> str:
     """Генерирует одну абсурдную новость через Groq."""
