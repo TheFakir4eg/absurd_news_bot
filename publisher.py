@@ -72,13 +72,16 @@ def parse_news(text: str) -> dict:
     }
 
 
-async def publish_news(text: str) -> dict:
+async def publish_news(text: str, image_url: str = "") -> dict:
     """
     Парсит новость и отправляет POST на сайт.
+    image_url — опциональная ссылка на картинку (если уже есть).
     Возвращает JSON-ответ сервера или поднимает исключение.
     """
     payload = parse_news(text)
-    logger.info("Публикация: title=%s", payload["title"][:80])
+    if image_url:
+        payload["image_url"] = image_url
+    logger.info("Публикация: title=%s, has_image=%s", payload["title"][:80], bool(image_url))
 
     async with httpx.AsyncClient(timeout=30.0, verify=_ssl_verify()) as client:
         response = await client.post(

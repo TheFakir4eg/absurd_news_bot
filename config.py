@@ -11,6 +11,12 @@ GROQ_MODEL = os.getenv("GROQ_MODEL")
 # OpenAI-compatible endpoint Groq
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
+# Pollinations (опционально — без ключа тоже работает через legacy endpoint)
+POLLINATIONS_API_KEY = os.getenv("POLLINATIONS_API_KEY", "").strip() or None
+POLLINATIONS_MODEL = os.getenv("POLLINATIONS_MODEL", "flux")  # flux / turbo / sana
+POLLINATIONS_WIDTH = int(os.getenv("POLLINATIONS_WIDTH", "1024"))
+POLLINATIONS_HEIGHT = int(os.getenv("POLLINATIONS_HEIGHT", "1024"))
+
 # Публикация на сайт
 PUBLISH_TOKEN = os.getenv("PUBLISH_TOKEN")
 PUBLISH_BASE = os.getenv("PUBLISH_BASE")
