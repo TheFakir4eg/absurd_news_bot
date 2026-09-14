@@ -11,6 +11,15 @@ GROQ_MODEL = os.getenv("GROQ_MODEL")
 # OpenAI-compatible endpoint Groq
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
+# Image provider: cloudflare (primary) | pollinations
+IMAGE_PROVIDER = os.getenv("IMAGE_PROVIDER", "cloudflare").strip().lower()
+
+# Cloudflare Workers AI (FLUX.1 Schnell)
+CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID", "").strip() or None
+CLOUDFLARE_API_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "").strip() or None
+CLOUDFLARE_STEPS = int(os.getenv("CLOUDFLARE_STEPS", "4"))
+CLOUDFLARE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+
 # Pollinations (опционально — без ключа тоже работает через legacy endpoint)
 POLLINATIONS_API_KEY = os.getenv("POLLINATIONS_API_KEY", "").strip() or None
 POLLINATIONS_MODEL = os.getenv("POLLINATIONS_MODEL", "flux")  # flux / turbo / sana

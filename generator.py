@@ -1,13 +1,21 @@
-# generator.py
+import base64
 import logging
+import random
+from dataclasses import dataclass
+from urllib.parse import quote
+
 import httpx
 from openai import AsyncOpenAI
-from urllib.parse import quote
 
 from config import (
     GROQ_API_KEY,
     GROQ_MODEL,
     GROQ_BASE_URL,
+    IMAGE_PROVIDER,
+    CLOUDFLARE_ACCOUNT_ID,
+    CLOUDFLARE_API_TOKEN,
+    CLOUDFLARE_STEPS,
+    CLOUDFLARE_MODEL,
     POLLINATIONS_API_KEY,
     POLLINATIONS_MODEL,
     POLLINATIONS_WIDTH,
@@ -20,13 +28,23 @@ from prompts import (
     IMAGE_PROMPT_USER,
 )
 
-
 logger = logging.getLogger(__name__)
 
 client = AsyncOpenAI(
     api_key=GROQ_API_KEY,
     base_url=GROQ_BASE_URL,
 )
+
+
+@dataclass
+class ImageResult:
+    """Результат генерации картинки."""
+
+    image_bytes: bytes | None = None  # для отправки в Telegram
+    image_url: str | None = None  # для сайта (если есть публичный URL)
+    provider: str = ""
+    image_prompt: str | None = None  # чтобы «новая картинка» могла переиспользовать
+
 
 async def _call_groq(
     system: str,
@@ -68,11 +86,9 @@ async def _call_groq(
 
     return content
 
-# async def generate_absurd_news() -> str:
-#     """Генерирует одну абсурдную новость через Groq."""
-#     return _call_groq(SYSTEM_PROMPT, USER_PROMPT, temperature=0.9, max_tokens=800)
 
 async def generate_absurd_news() -> str:
+    """Генерирует одну абсурдную новость через Groq."""
     return await _call_groq(
         SYSTEM_PROMPT,
         USER_PROMPT,
@@ -80,23 +96,6 @@ async def generate_absurd_news() -> str:
         max_tokens=800,
     )
 
-def build_pollinations_url(prompt: str) -> str:
-    """
-    Собирает URL картинки Pollinations (legacy endpoint).
-    Без ключа тоже работает. С ключом — nologo + выше приоритет.
-    """
-    encoded = quote(prompt, safe="")
-    params = [
-        f"width={POLLINATIONS_WIDTH}",
-        f"height={POLLINATIONS_HEIGHT}",
-        f"model={POLLINATIONS_MODEL}",
-        "nologo=true",
-        "private=true",
-    ]
-    if POLLINATIONS_API_KEY:
-        params.append(f"key={POLLINATIONS_API_KEY}")
-
-    return f"https://image.pollinations.ai/prompt/{encoded}?{'&'.join(params)}"
 
 async def generate_image_prompt(news: str) -> str:
     """По тексту новости генерирует короткий английский промпт для картинки."""
@@ -107,24 +106,85 @@ async def generate_image_prompt(news: str) -> str:
         temperature=0.7,
         max_tokens=200,
     )
-    # На всякий случай убираем кавычки и лишние переносы
     prompt = prompt.strip().strip('"').strip("'").strip()
     logger.info("Image prompt: %s", prompt[:200])
     return prompt
 
-async def generate_image_url(news: str) -> str:
-    """
-    Полный пайплайн: новость → промпт для картинки → URL картинки.
-    Возвращает готовый URL, который можно сразу отдавать в Telegram.
-    """
-    image_prompt = await generate_image_prompt(news)
-    url = build_pollinations_url(image_prompt)
-    logger.info("Pollinations URL ready (len=%d)", len(url))
-    return url
+
+# ---------------------------------------------------------------------------
+# Cloudflare Workers AI — FLUX.1 Schnell
+# ---------------------------------------------------------------------------
+
+
+async def generate_image_cloudflare(prompt: str) -> bytes:
+    """Генерирует картинку через Cloudflare Workers AI. Возвращает JPEG bytes."""
+    if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
+        raise ValueError("Cloudflare credentials not configured")
+
+    url = (
+        f"https://api.cloudflare.com/client/v4/accounts/"
+        f"{CLOUDFLARE_ACCOUNT_ID}/ai/run/{CLOUDFLARE_MODEL}"
+    )
+    payload = {
+        "prompt": prompt[:2048],
+        "steps": max(1, min(CLOUDFLARE_STEPS, 8)),
+        "seed": random.randint(1, 2_147_483_647),
+    }
+
+    async with httpx.AsyncClient(timeout=120.0) as http:
+        resp = await http.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    if not data.get("success"):
+        errors = data.get("errors") or data.get("messages") or data
+        raise RuntimeError(f"Cloudflare AI error: {errors}")
+
+    image_b64 = (data.get("result") or {}).get("image")
+    if not image_b64:
+        raise RuntimeError("Cloudflare returned empty image")
+
+    img_bytes = base64.b64decode(image_b64)
+    if len(img_bytes) < 500:
+        raise RuntimeError("Cloudflare image too small")
+
+    logger.info("Cloudflare image ok, size=%d bytes", len(img_bytes))
+    return img_bytes
+
+
+# ---------------------------------------------------------------------------
+# Pollinations (fallback)
+# ---------------------------------------------------------------------------
+
+
+def build_pollinations_url(prompt: str) -> str:
+    """Собирает URL картинки Pollinations (legacy endpoint)."""
+    encoded = quote(prompt, safe="")
+    # random seed, чтобы «новая картинка» реально отличалась
+    seed = random.randint(1, 999_999_999)
+    params = [
+        f"width={POLLINATIONS_WIDTH}",
+        f"height={POLLINATIONS_HEIGHT}",
+        f"model={POLLINATIONS_MODEL}",
+        f"seed={seed}",
+        "nologo=true",
+        "private=true",
+    ]
+    if POLLINATIONS_API_KEY:
+        params.append(f"key={POLLINATIONS_API_KEY}")
+
+    return f"https://image.pollinations.ai/prompt/{encoded}?{'&'.join(params)}"
 
 
 async def download_image_bytes(url: str, timeout: float = 90.0) -> bytes:
-    """Скачивает картинку по URL (на случай, если нужно отправить как файл)."""
+    """Скачивает картинку по URL."""
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as http:
         resp = await http.get(url)
         resp.raise_for_status()
@@ -132,3 +192,56 @@ async def download_image_bytes(url: str, timeout: float = 90.0) -> bytes:
         if "image" not in content_type and len(resp.content) < 1000:
             raise ValueError(f"Не похоже на картинку: content-type={content_type}")
         return resp.content
+
+
+async def generate_image_pollinations(prompt: str) -> ImageResult:
+    """Генерирует через Pollinations: URL + bytes (скачиваем)."""
+    url = build_pollinations_url(prompt)
+    logger.info("Pollinations URL ready (len=%d)", len(url))
+    try:
+        img_bytes = await download_image_bytes(url)
+        return ImageResult(image_bytes=img_bytes, image_url=url, provider="pollinations")
+    except Exception:
+        logger.exception("Не удалось скачать Pollinations, отдаём только URL")
+        return ImageResult(image_bytes=None, image_url=url, provider="pollinations")
+
+
+# ---------------------------------------------------------------------------
+# Unified entry: Cloudflare primary + Pollinations fallback
+# ---------------------------------------------------------------------------
+
+
+async def generate_image(news: str, *, reuse_prompt: str | None = None) -> ImageResult:
+    """
+    Полный пайплайн картинки.
+    reuse_prompt — если уже есть image-prompt (кнопка «новая картинка»),
+    не ходим снова в Groq (но seed/steps всё равно новые → другая картинка).
+    """
+    image_prompt = reuse_prompt or await generate_image_prompt(news)
+
+    # 1) Cloudflare (если выбран и настроен)
+    if IMAGE_PROVIDER == "cloudflare" and CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN:
+        try:
+            img_bytes = await generate_image_cloudflare(image_prompt)
+            return ImageResult(
+                image_bytes=img_bytes,
+                image_url=None,
+                provider="cloudflare",
+                image_prompt=image_prompt,
+            )
+        except Exception:
+            logger.exception("Cloudflare failed, falling back to Pollinations")
+
+    # 2) Pollinations
+    try:
+        result = await generate_image_pollinations(image_prompt)
+        result.image_prompt = image_prompt
+        return result
+    except Exception:
+        logger.exception("Pollinations also failed")
+        return ImageResult(
+            image_bytes=None,
+            image_url=None,
+            provider="none",
+            image_prompt=image_prompt,
+        )
