@@ -1,3 +1,5 @@
+# generator.py
+
 import base64
 import logging
 import random
@@ -27,6 +29,61 @@ from prompts import (
     IMAGE_PROMPT_SYSTEM,
     IMAGE_PROMPT_USER,
 )
+
+NEWS_CATEGORIES = [
+    "городская жизнь",
+    "транспорт",
+    "технологии",
+    "наука",
+    "экономика",
+    "работа",
+    "образование",
+    "экология",
+    "животные",
+    "еда",
+    "космос",
+    "спорт",
+    "медицина",
+    "архитектура",
+    "туризм",
+]
+
+ABSURD_MECHANISMS = [
+    "бюрократическое решение обычной проблемы",
+    "буквальное выполнение инструкции",
+    "ошибка в документации",
+    "ошибка в статистике",
+    "непредвиденное последствие реформы",
+    "оптимизация, которая зашла слишком далеко",
+    "неожиданное применение обычной технологии",
+    "обычная услуга получила совершенно ненужную функцию",
+    "технический сбой",
+    "странное природное явление",
+    "необычная реакция животных",
+    "бытовая привычка стала официальным правилом",
+    "экономический показатель начал влиять на физический мир",
+    "неудачное архитектурное решение",
+    "изобретение решило не ту проблему",
+]
+
+NEWS_SUBJECTS = [
+    "городской автобус",
+    "супермаркет",
+    "лифт",
+    "банковское приложение",
+    "школьная столовая",
+    "муниципальная парковка",
+    "робот-пылесос",
+    "уличные камеры",
+    "кофейный автомат",
+    "система навигации",
+    "почтовое отделение",
+    "домофон",
+    "служба доставки",
+    "офисное кресло",
+    "система отопления",
+    "городской парк",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -87,15 +144,40 @@ async def _call_groq(
     return content
 
 
+# async def generate_absurd_news() -> str:
+#     """Генерирует одну абсурдную новость через Groq."""
+#     return await _call_groq(
+#         SYSTEM_PROMPT,
+#         USER_PROMPT,
+#         temperature=0.9,
+#         max_tokens=800,
+#     )
 async def generate_absurd_news() -> str:
     """Генерирует одну абсурдную новость через Groq."""
+
+    category = random.choice(NEWS_CATEGORIES)
+    mechanism = random.choice(ABSURD_MECHANISMS)
+    subject = random.choice(NEWS_SUBJECTS)
+
+    user_prompt = USER_PROMPT.format(
+        category=category,
+        mechanism=mechanism,
+        subject=subject,
+    )
+
+    logger.info(
+        "Генерация новости: category=%s mechanism=%s subject=%s",
+        category,
+        mechanism,
+        subject,
+    )
+
     return await _call_groq(
         SYSTEM_PROMPT,
-        USER_PROMPT,
+        user_prompt,
         temperature=0.9,
         max_tokens=800,
     )
-
 
 async def generate_image_prompt(news: str) -> str:
     """По тексту новости генерирует короткий английский промпт для картинки."""
