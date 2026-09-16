@@ -1,4 +1,4 @@
-# publisher.py
+import base64
 import logging
 import re
 
@@ -72,18 +72,30 @@ def parse_news(text: str) -> dict:
     }
 
 
-async def publish_news(text: str, image_url: str = "") -> dict:
+async def publish_news(
+    text: str,
+    image_url: str = "",
+    image_bytes: bytes | None = None,
+) -> dict:
     """
     Парсит новость и отправляет POST на сайт.
-    image_url — опциональная ссылка на картинку (если уже есть).
-    Возвращает JSON-ответ сервера или поднимает исключение.
+    image_url — публичная ссылка (Pollinations и т.п.).
+    image_bytes — JPEG от Cloudflare; уйдёт как image_base64.
     """
     payload = parse_news(text)
     if image_url:
         payload["image_url"] = image_url
-    logger.info("Публикация: title=%s, has_image=%s", payload["title"][:80], bool(image_url))
+    if image_bytes:
+        payload["image_base64"] = base64.b64encode(image_bytes).decode("ascii")
 
-    async with httpx.AsyncClient(timeout=30.0, verify=_ssl_verify()) as client:
+    logger.info(
+        "Публикация: title=%s, has_url=%s, has_base64=%s",
+        payload["title"][:80],
+        bool(image_url),
+        bool(image_bytes),
+    )
+
+    async with httpx.AsyncClient(timeout=60.0, verify=_ssl_verify()) as client:
         response = await client.post(
             PUBLISH_URL,
             json=payload,

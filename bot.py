@@ -24,7 +24,8 @@ class StoredNews:
     """Данные новости, привязанные к message_id в Telegram."""
 
     text: str
-    image_url: str | None = None  # для сайта (Pollinations URL, если есть)
+    image_url: str | None = None  # Pollinations URL (если есть)
+    image_bytes: bytes | None = None  # JPEG от Cloudflare / скачанный файл
     image_prompt: str | None = None  # чтобы «новая картинка» не перегенерировала промпт
 
 
@@ -133,13 +134,15 @@ async def _send_news_with_image(
         _store[sent.message_id] = StoredNews(
             text=news,
             image_url=image.image_url,
+            image_bytes=image.image_bytes,
             image_prompt=image.image_prompt or reuse_prompt,
         )
         logger.info(
-            "Saved news for message_id=%s provider=%s has_url=%s",
+            "Saved news for message_id=%s provider=%s has_url=%s has_bytes=%s",
             sent.message_id,
             image.provider,
             bool(image.image_url),
+            bool(image.image_bytes),
         )
 
 
@@ -287,15 +290,22 @@ async def callback_done(callback: CallbackQuery):
         return
 
     image_url = (stored.image_url if stored else None) or ""
+    image_bytes = stored.image_bytes if stored else None
 
     try:
-        result = await publish_news(news_text, image_url=image_url)
-        logger.info("Опубликовано: %s (image=%s)", result, bool(image_url))
+        result = await publish_news(
+            news_text,
+            image_url=image_url,
+            image_bytes=image_bytes,
+        )
+        logger.info(
+            "Опубликовано: %s (url=%s, bytes=%s)",
+            result,
+            bool(image_url),
+            bool(image_bytes),
+        )
         await callback.message.edit_reply_markup(reply_markup=None)
-        note = ""
-        if not image_url:
-            note = "\n(картинка на сайт не передана — Cloudflare отдаёт файл без публичного URL)"
-        await callback.message.answer(f"✅ Новость опубликована на сайте!{note}")
+        await callback.message.answer("✅ Новость опубликована на сайте!")
     except Exception:
         logger.exception("Ошибка публикации")
         await callback.message.edit_reply_markup(reply_markup=None)
